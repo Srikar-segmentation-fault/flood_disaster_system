@@ -115,6 +115,15 @@ CESIUM_ION_TOKEN=your_cesium_ion_token
 
 ALERT_PHONE_LOCATION_1=+91xxxxxxxxxx   # Primary alert recipient
 ALERT_PHONE_LOCATION_2=+91xxxxxxxxxx   # Secondary alert recipient
+
+# SMS abuse protection (since /send-alert has no auth) — optional, defaults shown
+MAX_ALERTS_PER_IP_PER_HOUR=5           # Max alert requests from one IP per rolling hour
+MAX_ALERTS_PER_DAY_TOTAL=50            # Hard cap on total SMS sent per day, across all clients
+
+# Farmer endpoint abuse protection (since /farmers has no auth) — optional, defaults shown
+MAX_FARMER_REGS_PER_IP_PER_HOUR=10     # Max farmer registrations from one IP per rolling hour
+MAX_FARMER_REGS_PER_DAY_TOTAL=200      # Hard cap on total farmer registrations per day
+MAX_FARMER_DELETES_PER_IP_PER_HOUR=10  # Max farmer deletions from one IP per rolling hour
 ```
 
 > ⚠️ **Never commit your `.env` file to version control.**

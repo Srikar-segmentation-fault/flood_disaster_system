@@ -2054,6 +2054,7 @@ async function triggerSMSAlert(zone,wd){
     const data=await resp.json();
     if(data.status==='sent'){addSMSLog(zone.name,c.label,'Sent',logId);showSMSToast(zone.name,c.label);}
     else if(data.status==='skipped') addSMSLog(zone.name,c.label,'Skipped',logId);
+    else if(data.status==='rate_limited') addSMSLog(zone.name,c.label,'Skipped',logId,data.reason||'Rate limited');
     else addSMSLog(zone.name,c.label,'Failed',logId,data.error||'Unknown');
   }catch(e){addSMSLog(zone.name,c.label,'Failed',logId,'Server unreachable');}
 }

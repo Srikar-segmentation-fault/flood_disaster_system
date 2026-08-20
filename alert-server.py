@@ -1,10 +1,11 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from twilio.rest import Client
 from dotenv import load_dotenv
 import os, datetime, json, httpx
 from typing import Optional
+from collections import deque
 
 load_dotenv()
 
@@ -20,9 +21,64 @@ OWM_KEY           = os.getenv("OPENWEATHER_API_KEY")
 CESIUM_ION_TOKEN  = os.getenv("CESIUM_ION_TOKEN")
 ALERT_TO          = os.getenv("ALERT_PHONE_LOCATION_1")
 
+# ── Abuse limits (several endpoints have no auth, so these are the safety net) ──
+MAX_ALERTS_PER_IP_PER_HOUR       = int(os.getenv("MAX_ALERTS_PER_IP_PER_HOUR", "5"))
+MAX_ALERTS_PER_DAY_TOTAL         = int(os.getenv("MAX_ALERTS_PER_DAY_TOTAL", "50"))
+MAX_FARMER_REGS_PER_IP_PER_HOUR  = int(os.getenv("MAX_FARMER_REGS_PER_IP_PER_HOUR", "10"))
+MAX_FARMER_REGS_PER_DAY_TOTAL    = int(os.getenv("MAX_FARMER_REGS_PER_DAY_TOTAL", "200"))
+MAX_FARMER_DELETES_PER_IP_PER_HOUR = int(os.getenv("MAX_FARMER_DELETES_PER_IP_PER_HOUR", "10"))
+RATE_LIMIT_WINDOW_SECONDS        = 3600  # 1 hour rolling window for all per-IP limits
+
 sent_alerts: dict = {}
 usgs_cache: dict = {"data": None, "fetched_at": None}
 FARMERS_FILE = os.path.join(os.path.dirname(__file__), "farmers.json")
+
+# In-memory abuse tracking (resets on server restart — fine for this scale)
+action_timestamps: dict[tuple[str, str], deque] = {}   # (bucket, ip) -> deque[datetime] of recent attempts
+daily_counters: dict[str, dict] = {}                    # bucket -> {"date": ..., "count": ...}
+
+
+def get_client_ip(request: Request) -> str:
+    """Resolve the real client IP, honoring X-Forwarded-For when behind a proxy (e.g. Render)."""
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def check_rate_limit(bucket: str, ip: str, max_per_hour: int, max_per_day: Optional[int] = None) -> Optional[str]:
+    """
+    Generic per-IP hourly limiter with an optional global daily cap, tracked per named
+    'bucket' (e.g. 'sms_alert', 'farmer_register', 'farmer_delete').
+    Returns an error reason string if the request should be blocked, or None if allowed
+    (in which case the attempt is recorded as consumed).
+    """
+    now = datetime.datetime.now()
+
+    # ── Global daily cap (optional) ──
+    if max_per_day is not None:
+        today = now.date().isoformat()
+        counter = daily_counters.setdefault(bucket, {"date": None, "count": 0})
+        if counter["date"] != today:
+            counter["date"] = today
+            counter["count"] = 0
+        if counter["count"] >= max_per_day:
+            return f"Daily limit reached for {bucket} ({max_per_day}/day). Try again tomorrow."
+
+    # ── Per-IP rolling hourly limit ──
+    window_start = now - datetime.timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS)
+    key = (bucket, ip)
+    dq = action_timestamps.setdefault(key, deque())
+    while dq and dq[0] < window_start:
+        dq.popleft()
+    if len(dq) >= max_per_hour:
+        return f"Rate limit exceeded: max {max_per_hour}/hour per client for {bucket}."
+
+    # Allowed — record this attempt
+    dq.append(now)
+    if max_per_day is not None:
+        daily_counters[bucket]["count"] += 1
+    return None
 
 print("=" * 58)
 print("  FloodSense AI Alert Server v3.0")
@@ -32,6 +88,7 @@ print(f"  Twilio Token : {'[OK]' if TWILIO_TOKEN  else '[MISSING]'}")
 print(f"  Twilio FROM  : {TWILIO_FROM  or '[MISSING]'}")
 print(f"  Alert TO     : {ALERT_TO     or '[MISSING] (ALERT_PHONE_LOCATION_1)'}")
 print(f"  OWM Key      : {'[OK]' if OWM_KEY       else '[MISSING]'}")
+print(f"  SMS limits   : {MAX_ALERTS_PER_IP_PER_HOUR}/hr per IP, {MAX_ALERTS_PER_DAY_TOTAL}/day total")
 print("=" * 58)
 print("  Endpoints:")
 print("  GET  /health          — Server health check")
@@ -130,7 +187,7 @@ async def get_config():
     }
 
 @app.post("/send-alert")
-async def send_alert(req: AlertRequest):
+async def send_alert(req: AlertRequest, request: Request):
     if not is_valid_phone(ALERT_TO):
         print(f"[SMS] Skipped {req.zone_name} — ALERT_PHONE_LOCATION_1 not configured")
         return {"status": "skipped", "reason": "ALERT_PHONE_LOCATION_1 not set in .env"}
@@ -139,6 +196,12 @@ async def send_alert(req: AlertRequest):
     key = f"{req.zone_name}_{now.hour}"
     if key in sent_alerts:
         return {"status": "skipped", "reason": "Already alerted this hour"}
+
+    client_ip = get_client_ip(request)
+    limit_reason = check_rate_limit("sms_alert", client_ip, MAX_ALERTS_PER_IP_PER_HOUR, MAX_ALERTS_PER_DAY_TOTAL)
+    if limit_reason:
+        print(f"[SMS] Blocked from {client_ip} — {limit_reason}")
+        return {"status": "rate_limited", "reason": limit_reason}
 
     emoji = "🔴" if req.risk_label in ["Critical", "Extreme"] else "🟠"
     message = (
@@ -186,8 +249,17 @@ async def get_farmers():
     return {"farmers": load_farmers()}
 
 @app.post("/farmers")
-async def register_farmer(farmer: FarmerRecord):
+async def register_farmer(farmer: FarmerRecord, request: Request):
     """Register a new farmer field."""
+    client_ip = get_client_ip(request)
+    limit_reason = check_rate_limit(
+        "farmer_register", client_ip,
+        MAX_FARMER_REGS_PER_IP_PER_HOUR, MAX_FARMER_REGS_PER_DAY_TOTAL
+    )
+    if limit_reason:
+        print(f"[FARMER] Registration blocked from {client_ip} — {limit_reason}")
+        raise HTTPException(status_code=429, detail=limit_reason)
+
     farmers = load_farmers()
     record = farmer.dict()
     record["id"] = int(datetime.datetime.now().timestamp() * 1000)
@@ -199,8 +271,17 @@ async def register_farmer(farmer: FarmerRecord):
     return {"status": "registered", "id": record["id"], "farmer": record}
 
 @app.delete("/farmers/{farmer_id}")
-async def remove_farmer(farmer_id: int):
+async def remove_farmer(farmer_id: int, request: Request):
     """Remove a farmer record by ID."""
+    client_ip = get_client_ip(request)
+    limit_reason = check_rate_limit(
+        "farmer_delete", client_ip,
+        MAX_FARMER_DELETES_PER_IP_PER_HOUR
+    )
+    if limit_reason:
+        print(f"[FARMER] Delete blocked from {client_ip} — {limit_reason}")
+        raise HTTPException(status_code=429, detail=limit_reason)
+
     farmers = load_farmers()
     new_farmers = [f for f in farmers if f.get("id") != farmer_id]
     if len(new_farmers) == len(farmers):

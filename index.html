@@ -8,6 +8,7 @@
 
 <script>
   let CONFIG = {
+    API_BASE_URL: 'http://localhost:8000',   // change to your deployed backend URL, e.g. https://your-backend.onrender.com
     CESIUM_ION_TOKEN : '',
     OPENWEATHER_API_KEY: '',
     UPDATE_INTERVAL_MS: 60000,
@@ -2050,7 +2051,7 @@ async function triggerSMSAlert(zone,wd){
   const logId=zone.name.replace(/\s+/g,'-')+'-'+Date.now();
   addSMSLog(zone.name,c.label,'Sending...',logId);
   try{
-    const resp=await fetch('http://localhost:8000/send-alert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({zone_name:zone.name,region:zone.region,lat:zone.lat,lon:zone.lon,risk_score:wd.score,risk_label:c.label,rainfall:wd.rainfall,wind:wd.wind,humidity:wd.humidity})});
+    const resp=await fetch(`${CONFIG.API_BASE_URL}/send-alert`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({zone_name:zone.name,region:zone.region,lat:zone.lat,lon:zone.lon,risk_score:wd.score,risk_label:c.label,rainfall:wd.rainfall,wind:wd.wind,humidity:wd.humidity})});
     const data=await resp.json();
     if(data.status==='sent'){addSMSLog(zone.name,c.label,'Sent',logId);showSMSToast(zone.name,c.label);}
     else if(data.status==='skipped') addSMSLog(zone.name,c.label,'Skipped',logId);
@@ -2183,7 +2184,7 @@ window.addEventListener('load',async()=>{
   try{
     document.getElementById('lmsg').textContent='Fetching configuration…';
     try{
-      const cfgRes=await fetch('http://localhost:8000/config');
+      const cfgRes=await fetch(`${CONFIG.API_BASE_URL}/config`);
       const cfg=await cfgRes.json();
       if(cfg.cesium_ion_token) CONFIG.CESIUM_ION_TOKEN=cfg.cesium_ion_token;
       if(cfg.openweather_api_key) CONFIG.OPENWEATHER_API_KEY=cfg.openweather_api_key;

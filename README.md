@@ -4,6 +4,15 @@
 
 ---
 
+## 🌐 Live Deployment
+
+| Service | URL | Notes |
+|---------|-----|-------|
+| **Frontend (3D Globe + Dashboards)** | [flood-disaster-system-1.onrender.com](https://flood-disaster-system-1.onrender.com/) | Static site — open this to use the app |
+| **Backend (FastAPI API)** | [flood-disaster-system.onrender.com](https://flood-disaster-system.onrender.com) | API only — no frontend UI, used internally by the site above |
+
+---
+
 ## 📁 Project Structure
 
 ```text

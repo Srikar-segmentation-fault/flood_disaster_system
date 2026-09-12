@@ -10,7 +10,7 @@
   let CONFIG = {
     API_BASE_URL: 'https://flood-disaster-system.onrender.com',   // change to your deployed backend URL, e.g. https://your-backend.onrender.com
     CESIUM_ION_TOKEN : '',
-    OPENWEATHER_API_KEY: '',
+    WEATHER_ENABLED: false,   // set true by /config if the backend has OPENWEATHER_API_KEY configured
     UPDATE_INTERVAL_MS: 60000,
   };
 </script>
@@ -1412,13 +1412,14 @@ async function initCesium(){
 // ═══════════════════════════════════════════════════════════════════
 async function fetchRisk(zone){
   let raw;
-  if(!CONFIG.OPENWEATHER_API_KEY || CONFIG.OPENWEATHER_API_KEY==='YOUR_OPENWEATHER_API_KEY'){
+  if(!CONFIG.WEATHER_ENABLED){
     const noise=(Math.random()-0.5)*0.26, timeFn=Math.sin(Date.now()/900000)*0.10;
     const simScore=Math.max(0.05,Math.min(0.99,zone.base+noise+timeFn));
     raw={score:simScore,rainfall:(simScore*110+Math.random()*25).toFixed(1),humidity:(55+simScore*38+Math.random()*5).toFixed(0),wind:(simScore*55+Math.random()*12).toFixed(1),desc:simScore>0.75?'Heavy thunderstorm':simScore>0.5?'Moderate rain':'Light showers',source:'Simulation'};
   } else {
     try{
-      const url=`https://api.openweathermap.org/data/2.5/weather?lat=${zone.lat}&lon=${zone.lon}&appid=${CONFIG.OPENWEATHER_API_KEY}&units=metric`;
+      // Weather is fetched via our backend proxy so the OpenWeatherMap key never reaches the browser.
+      const url=`${CONFIG.API_BASE_URL}/weather?lat=${zone.lat}&lon=${zone.lon}`;
       const data=await (await fetch(url)).json();
       const rain=data.rain?(data.rain['1h']||data.rain['3h']||0):0;
       const hum=data.main.humidity, wind=data.wind.speed;
@@ -2120,7 +2121,7 @@ async function runPrediction(){
     addMarker(zone,wd);
     addFeed(zone,wd);
     if(wd.score>=0.65) triggerSMSAlert(zone,wd);
-    if(CONFIG.OPENWEATHER_API_KEY&&CONFIG.OPENWEATHER_API_KEY!=='YOUR_OPENWEATHER_API_KEY')
+    if(CONFIG.WEATHER_ENABLED)
       await new Promise(r=>setTimeout(r,220));
   }
   const scores=results.map(r=>r.wd.score);
@@ -2279,7 +2280,7 @@ window.addEventListener('load',async()=>{
       const cfgRes=await fetch(`${CONFIG.API_BASE_URL}/config`);
       const cfg=await cfgRes.json();
       if(cfg.cesium_ion_token) CONFIG.CESIUM_ION_TOKEN=cfg.cesium_ion_token;
-      if(cfg.openweather_api_key) CONFIG.OPENWEATHER_API_KEY=cfg.openweather_api_key;
+      CONFIG.WEATHER_ENABLED=!!cfg.weather_enabled;
     }catch(e){console.warn('Config server not available, using inline CONFIG');}
 
     document.getElementById('lmsg').textContent='Initializing Cesium globe…';

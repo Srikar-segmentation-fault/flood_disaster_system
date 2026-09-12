@@ -133,6 +133,14 @@ MAX_ALERTS_PER_DAY_TOTAL=50            # Hard cap on total SMS sent per day, acr
 MAX_FARMER_REGS_PER_IP_PER_HOUR=10     # Max farmer registrations from one IP per rolling hour
 MAX_FARMER_REGS_PER_DAY_TOTAL=200      # Hard cap on total farmer registrations per day
 MAX_FARMER_DELETES_PER_IP_PER_HOUR=10  # Max farmer deletions from one IP per rolling hour
+
+# Weather proxy abuse protection (since /weather has no auth) — optional, default shown
+MAX_WEATHER_REQS_PER_IP_PER_HOUR=120   # Max weather lookups from one IP per rolling hour
+
+# Auth (register/login) — required for persistent sessions across server restarts
+JWT_SECRET=your_long_random_secret_here   # generate with: python -c "import secrets; print(secrets.token_hex(32))"
+JWT_EXPIRY_HOURS=168                      # how long a login session stays valid (default: 7 days)
+MAX_AUTH_ATTEMPTS_PER_IP_PER_HOUR=20      # Max register/login attempts from one IP per rolling hour
 ```
 
 > ⚠️ **Never commit your `.env` file to version control.**

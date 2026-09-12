@@ -1,3 +1,6 @@
+import truststore
+truststore.inject_into_ssl()  # use the OS certificate store (fixes SSL verify issues on some systems, e.g. Windows)
+
 from fastapi import FastAPI, HTTPException, Request, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
@@ -29,7 +32,11 @@ MAX_ALERTS_PER_DAY_TOTAL         = int(os.getenv("MAX_ALERTS_PER_DAY_TOTAL", "50
 MAX_FARMER_REGS_PER_IP_PER_HOUR  = int(os.getenv("MAX_FARMER_REGS_PER_IP_PER_HOUR", "10"))
 MAX_FARMER_REGS_PER_DAY_TOTAL    = int(os.getenv("MAX_FARMER_REGS_PER_DAY_TOTAL", "200"))
 MAX_FARMER_DELETES_PER_IP_PER_HOUR = int(os.getenv("MAX_FARMER_DELETES_PER_IP_PER_HOUR", "10"))
+MAX_WEATHER_REQS_PER_IP_PER_HOUR = int(os.getenv("MAX_WEATHER_REQS_PER_IP_PER_HOUR", "120"))
 RATE_LIMIT_WINDOW_SECONDS        = 3600  # 1 hour rolling window for all per-IP limits
+
+weather_cache: dict = {}  # "lat,lon" (rounded) -> {"data": ..., "fetched_at": datetime}
+WEATHER_CACHE_TTL_SECONDS = 120
 
 sent_alerts: dict = {}
 usgs_cache: dict = {"data": None, "fetched_at": None}
@@ -289,8 +296,46 @@ async def health():
 async def get_config():
     return {
         "cesium_ion_token": CESIUM_ION_TOKEN,
-        "openweather_api_key": OWM_KEY,
+        # openweather_api_key intentionally NOT exposed — weather is fetched
+        # server-side via /weather so the key never reaches the browser.
+        "weather_enabled": bool(OWM_KEY),
     }
+
+
+@app.get("/weather")
+async def get_weather(lat: float, lon: float, request: Request):
+    """
+    Proxy for OpenWeatherMap's current-weather endpoint. Keeps OWM_KEY server-side
+    only. Cached briefly per rounded coordinate to limit upstream calls, and
+    rate-limited per IP since this endpoint has no auth.
+    """
+    client_ip = get_client_ip(request)
+    limit_reason = check_rate_limit("weather", client_ip, MAX_WEATHER_REQS_PER_IP_PER_HOUR)
+    if limit_reason:
+        raise HTTPException(status_code=429, detail=limit_reason)
+
+    if not OWM_KEY:
+        raise HTTPException(status_code=503, detail="OPENWEATHER_API_KEY not configured on server")
+
+    cache_key = f"{round(lat, 2)},{round(lon, 2)}"
+    now = datetime.datetime.now()
+    cached = weather_cache.get(cache_key)
+    if cached and (now - cached["fetched_at"]).total_seconds() < WEATHER_CACHE_TTL_SECONDS:
+        return cached["data"]
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.openweathermap.org/data/2.5/weather",
+                params={"lat": lat, "lon": lon, "appid": OWM_KEY, "units": "metric"},
+            )
+            data = resp.json()
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail=data.get("message", "OpenWeatherMap error"))
+            weather_cache[cache_key] = {"data": data, "fetched_at": now}
+            return data
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"OpenWeatherMap unavailable: {e}")
 
 
 # ── AUTH ──────────────────────────────────────────────────────────

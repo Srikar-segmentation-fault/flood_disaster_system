@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Register — FloodSense AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg-dark:#0a0e17;--bg-panel:#0f1520;--bg-card:#141c2e;
+  --border:rgba(99,179,237,0.15);--border-glow:rgba(99,179,237,0.35);
+  --text-primary:#e8f0fe;--text-secondary:#8ba3c7;--text-muted:#4a6080;
+  --accent-blue:#3b82f6;--accent-cyan:#06b6d4;
+  --font:'Inter',sans-serif;--mono:'JetBrains Mono',monospace;
+}
+body{
+  font-family:var(--font);background:var(--bg-dark);color:var(--text-primary);
+  min-height:100vh;display:flex;align-items:center;justify-content:center;
+  padding:20px;
+}
+.auth-card{
+  background:var(--bg-panel);border:1px solid var(--border);border-radius:16px;
+  padding:36px 34px;width:400px;max-width:100%;
+  box-shadow:0 8px 40px rgba(0,0,0,0.5);
+}
+.auth-logo{display:flex;align-items:center;gap:10px;margin-bottom:22px;}
+.auth-logo svg{width:30px;height:30px;flex-shrink:0;}
+.auth-logo span{font-size:16px;font-weight:700;color:#60a5fa;letter-spacing:-0.3px;}
+.auth-title{font-size:20px;font-weight:700;margin-bottom:6px;}
+.auth-sub{font-size:12px;color:var(--text-muted);margin-bottom:26px;}
+.field{margin-bottom:16px;}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.field label{
+  display:block;font-size:10px;font-weight:600;text-transform:uppercase;
+  letter-spacing:0.8px;color:var(--text-muted);margin-bottom:6px;
+}
+.field input,.field select{
+  width:100%;background:var(--bg-card);border:1px solid var(--border);
+  border-radius:8px;padding:10px 12px;font-size:13px;color:var(--text-primary);
+  font-family:var(--font);outline:none;transition:border-color 0.2s;
+}
+.field input:focus,.field select:focus{border-color:var(--border-glow);}
+.field input::placeholder{color:var(--text-muted);}
+.field-error{font-size:10px;color:#f87171;margin-top:5px;display:none;}
+.field-hint{font-size:10px;color:var(--text-muted);margin-top:5px;}
+.terms-row{
+  display:flex;align-items:flex-start;gap:8px;margin-bottom:20px;
+  font-size:11px;color:var(--text-secondary);line-height:1.4;
+}
+.terms-row input{margin-top:2px;flex-shrink:0;}
+.btn-submit{
+  width:100%;padding:11px;border-radius:8px;border:none;
+  background:#1d4ed8;color:#fff;font-size:13px;font-weight:700;
+  cursor:pointer;transition:background 0.2s;
+}
+.btn-submit:hover{background:#2563eb;}
+.form-msg{
+  font-size:11px;color:var(--accent-cyan);text-align:center;
+  margin-top:14px;display:none;
+}
+.auth-footer{
+  text-align:center;font-size:12px;color:var(--text-muted);margin-top:22px;
+}
+.auth-footer a{color:#60a5fa;text-decoration:none;font-weight:600;}
+.auth-footer a:hover{text-decoration:underline;}
+.disabled-note{
+  font-size:10px;color:var(--text-muted);text-align:center;margin-top:18px;
+  border-top:1px solid var(--border);padding-top:14px;line-height:1.5;
+}
+</style>
+</head>
+<body>
+
+<div class="auth-card">
+  <div class="auth-logo">
+    <svg viewBox="0 0 28 28" fill="none">
+      <circle cx="14" cy="14" r="13" stroke="#3b82f6" stroke-width="1.5"/>
+      <path d="M5 19 C7 15,9 21,11 17 C13 13,15 20,17 16 C19 12,21 18,23 18" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" fill="none"/>
+      <circle cx="14" cy="9" r="3" fill="#3b82f6" opacity="0.75"/>
+      <path d="M14 12 L14 17" stroke="#3b82f6" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+    <span>FloodSense AI</span>
+  </div>
+
+  <div class="auth-title">Create an account</div>
+  <div class="auth-sub">Register to monitor risk zones and receive alerts</div>
+
+  <form id="register-form" novalidate>
+    <div class="field">
+      <label for="reg-name">Full Name</label>
+      <input type="text" id="reg-name" name="name" placeholder="Jane Doe" required/>
+      <div class="field-error" id="reg-name-error">Name is required.</div>
+    </div>
+
+    <div class="field">
+      <label for="reg-email">Email</label>
+      <input type="email" id="reg-email" name="email" placeholder="you@example.com" required/>
+      <div class="field-error" id="reg-email-error">Please enter a valid email.</div>
+    </div>
+
+    <div class="field">
+      <label for="reg-phone">Phone Number</label>
+      <input type="tel" id="reg-phone" name="phone" placeholder="+91xxxxxxxxxx"/>
+      <div class="field-hint">Used for SMS risk alerts (optional).</div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="reg-password">Password</label>
+        <input type="password" id="reg-password" name="password" placeholder="••••••••" required minlength="6"/>
+        <div class="field-error" id="reg-password-error">Min. 6 characters.</div>
+      </div>
+      <div class="field">
+        <label for="reg-confirm">Confirm Password</label>
+        <input type="password" id="reg-confirm" name="confirm" placeholder="••••••••" required/>
+        <div class="field-error" id="reg-confirm-error">Passwords don't match.</div>
+      </div>
+    </div>
+
+    <div class="terms-row">
+      <input type="checkbox" id="reg-terms" required/>
+      <label for="reg-terms">I agree to receive flood/storm risk alerts and understand this is a research/educational system.</label>
+    </div>
+
+    <button type="submit" class="btn-submit">Create Account</button>
+    <div class="form-msg" id="register-msg"></div>
+  </form>
+
+  <div class="auth-footer">
+    Already have an account? <a href="login.html">Sign in</a>
+  </div>
+
+  <div class="disabled-note">
+    Your location (if allowed) is registered so we can show you flood/storm risk specific to your area.
+  </div>
+</div>
+
+<script>
+const API_BASE_URL = 'http://localhost:8000'; // change to your deployed backend URL, e.g. https://flood-disaster-system.onrender.com
+
+let capturedLat = null, capturedLon = null;
+
+// Try to capture the user's location up front (silently — user can allow/deny via the browser prompt).
+if('geolocation' in navigator){
+  navigator.geolocation.getCurrentPosition(
+    pos=>{ capturedLat = pos.coords.latitude; capturedLon = pos.coords.longitude; },
+    ()=>{ /* denied or unavailable — registration still works without it */ }
+  );
+}
+
+document.getElementById('register-form').addEventListener('submit', async function(e){
+  e.preventDefault();
+
+  const name = document.getElementById('reg-name');
+  const email = document.getElementById('reg-email');
+  const password = document.getElementById('reg-password');
+  const confirm = document.getElementById('reg-confirm');
+  const terms = document.getElementById('reg-terms');
+  const msg = document.getElementById('register-msg');
+  let valid = true;
+
+  const nameValid = name.value.trim().length > 0;
+  document.getElementById('reg-name-error').style.display = nameValid ? 'none' : 'block';
+  if(!nameValid) valid = false;
+
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim());
+  document.getElementById('reg-email-error').style.display = emailValid ? 'none' : 'block';
+  if(!emailValid) valid = false;
+
+  const passValid = password.value.length >= 6;
+  document.getElementById('reg-password-error').style.display = passValid ? 'none' : 'block';
+  if(!passValid) valid = false;
+
+  const confirmValid = confirm.value === password.value && confirm.value.length > 0;
+  document.getElementById('reg-confirm-error').style.display = confirmValid ? 'none' : 'block';
+  if(!confirmValid) valid = false;
+
+  if(!terms.checked) valid = false;
+
+  if(!valid){
+    msg.textContent = 'Please fix the errors above.';
+    msg.style.color = '#f87171';
+    msg.style.display = 'block';
+    return;
+  }
+
+  msg.textContent = 'Creating your account…';
+  msg.style.color = '#8ba3c7';
+  msg.style.display = 'block';
+
+  try{
+    const resp = await fetch(`${API_BASE_URL}/auth/register`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        name: name.value.trim(),
+        email: email.value.trim(),
+        password: password.value,
+        lat: capturedLat,
+        lon: capturedLon,
+      })
+    });
+    const data = await resp.json();
+
+    if(resp.ok){
+      localStorage.setItem('floodsense_token', data.token);
+      localStorage.setItem('floodsense_user', JSON.stringify(data.user));
+      msg.textContent = 'Account created! Redirecting…';
+      msg.style.color = '#4ade80';
+      setTimeout(()=>{ window.location.href = 'index.html'; }, 900);
+    } else {
+      msg.textContent = data.detail || 'Registration failed.';
+      msg.style.color = '#f87171';
+    }
+  } catch(err){
+    msg.textContent = 'Could not reach the server. Is the backend running?';
+    msg.style.color = '#f87171';
+  }
+});
+</script>
+
+</body>
+</html>

@@ -1,11 +1,13 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from twilio.rest import Client
 from dotenv import load_dotenv
-import os, datetime, json, httpx
+import os, datetime, json, httpx, re, secrets
 from typing import Optional
 from collections import deque
+import bcrypt
+import jwt as pyjwt
 
 load_dotenv()
 
@@ -32,6 +34,24 @@ RATE_LIMIT_WINDOW_SECONDS        = 3600  # 1 hour rolling window for all per-IP 
 sent_alerts: dict = {}
 usgs_cache: dict = {"data": None, "fetched_at": None}
 FARMERS_FILE = os.path.join(os.path.dirname(__file__), "farmers.json")
+USERS_FILE   = os.path.join(os.path.dirname(__file__), "users.json")
+
+# ── Auth config ───────────────────────────────────────────────────
+JWT_SECRET     = os.getenv("JWT_SECRET")
+JWT_ALGORITHM  = "HS256"
+JWT_EXPIRY_HOURS = int(os.getenv("JWT_EXPIRY_HOURS", "168"))  # 7 days
+
+if not JWT_SECRET:
+    # Falls back to a random secret generated at process start. This means
+    # existing tokens are invalidated on every restart — fine for a demo,
+    # but set JWT_SECRET in .env for real deployments so sessions persist.
+    JWT_SECRET = secrets.token_hex(32)
+    print("[AUTH] [WARNING] JWT_SECRET not set in .env — using a random secret for this run. "
+          "All sessions will be invalidated on restart. Set JWT_SECRET in production.")
+
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+MAX_AUTH_ATTEMPTS_PER_IP_PER_HOUR = int(os.getenv("MAX_AUTH_ATTEMPTS_PER_IP_PER_HOUR", "20"))
 
 # In-memory abuse tracking (resets on server restart — fine for this scale)
 action_timestamps: dict[tuple[str, str], deque] = {}   # (bucket, ip) -> deque[datetime] of recent attempts
@@ -88,11 +108,16 @@ print(f"  Twilio Token : {'[OK]' if TWILIO_TOKEN  else '[MISSING]'}")
 print(f"  Twilio FROM  : {TWILIO_FROM  or '[MISSING]'}")
 print(f"  Alert TO     : {ALERT_TO     or '[MISSING] (ALERT_PHONE_LOCATION_1)'}")
 print(f"  OWM Key      : {'[OK]' if OWM_KEY       else '[MISSING]'}")
+print(f"  JWT Secret   : {'[OK] (from .env)' if os.getenv('JWT_SECRET') else '[WARNING] random (set JWT_SECRET in .env)'}")
 print(f"  SMS limits   : {MAX_ALERTS_PER_IP_PER_HOUR}/hr per IP, {MAX_ALERTS_PER_DAY_TOTAL}/day total")
 print("=" * 58)
 print("  Endpoints:")
 print("  GET  /health          — Server health check")
 print("  GET  /config          — Frontend config (tokens)")
+print("  POST /auth/register   — Create a user account")
+print("  POST /auth/login      — Log in, returns JWT token")
+print("  GET  /auth/me         — Get current user (auth required)")
+print("  PUT  /auth/location    — Update current user's location (auth required)")
 print("  POST /send-alert      — Trigger Twilio SMS alert")
 print("  GET  /earthquakes     — Proxied USGS earthquake feed")
 print("  GET  /farmers         — List farmer records")
@@ -115,6 +140,60 @@ def save_farmers(farmers):
 
 def is_valid_phone(phone) -> bool:
     return bool(phone and len(phone) > 5)
+
+
+# ── User / Auth helpers ──────────────────────────────────────────────
+def load_users() -> list:
+    if not os.path.exists(USERS_FILE):
+        return []
+    with open(USERS_FILE, "r") as f:
+        return json.load(f)
+
+def save_users(users: list):
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f, indent=2)
+
+def find_user_by_email(email: str) -> Optional[dict]:
+    email = email.strip().lower()
+    return next((u for u in load_users() if u["email"] == email), None)
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+def verify_password(password: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
+
+def create_access_token(user: dict) -> str:
+    payload = {
+        "sub": str(user["id"]),
+        "email": user["email"],
+        "name": user["name"],
+        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=JWT_EXPIRY_HOURS),
+        "iat": datetime.datetime.utcnow(),
+    }
+    return pyjwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+def decode_access_token(token: str) -> dict:
+    try:
+        return pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Session expired, please log in again.")
+    except pyjwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid authentication token.")
+
+def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
+    """FastAPI dependency: extracts and validates the Bearer token, returns the decoded claims."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or malformed Authorization header.")
+    token = authorization.removeprefix("Bearer ").strip()
+    return decode_access_token(token)
+
+def public_user(user: dict) -> dict:
+    """Strip the password hash before returning a user record to the client."""
+    return {k: v for k, v in user.items() if k != "password_hash"}
 
 def send_sms(message: str):
     missing = []
@@ -158,6 +237,33 @@ class FarmerRecord(BaseModel):
     lat:      float
     lon:      float
 
+class RegisterRequest(BaseModel):
+    name:     str
+    email:    str
+    password: str
+    lat:      Optional[float] = None
+    lon:      Optional[float] = None
+    location_label: Optional[str] = None   # e.g. reverse-geocoded place name
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v):
+        v = v.strip().lower()
+        if not EMAIL_RE.match(v):
+            raise ValueError("Invalid email address")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v):
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        return v
+
+class LoginRequest(BaseModel):
+    email:    str
+    password: str
+
 class FarmerFeedback(BaseModel):
     farmer_id: int
     zone_name: str
@@ -185,6 +291,83 @@ async def get_config():
         "cesium_ion_token": CESIUM_ION_TOKEN,
         "openweather_api_key": OWM_KEY,
     }
+
+
+# ── AUTH ──────────────────────────────────────────────────────────
+@app.post("/auth/register")
+async def register_user(req: RegisterRequest, request: Request):
+    """Register a new user account, optionally tagged with their location."""
+    client_ip = get_client_ip(request)
+    limit_reason = check_rate_limit("auth", client_ip, MAX_AUTH_ATTEMPTS_PER_IP_PER_HOUR)
+    if limit_reason:
+        raise HTTPException(status_code=429, detail=limit_reason)
+
+    if find_user_by_email(req.email):
+        raise HTTPException(status_code=409, detail="An account with this email already exists.")
+
+    users = load_users()
+    user = {
+        "id": int(datetime.datetime.now().timestamp() * 1000),
+        "name": req.name.strip(),
+        "email": req.email,
+        "password_hash": hash_password(req.password),
+        "lat": req.lat,
+        "lon": req.lon,
+        "location_label": req.location_label,
+        "created": datetime.datetime.now().isoformat(),
+    }
+    users.append(user)
+    save_users(users)
+    print(f"[AUTH] Registered: {user['email']} at ({user['lat']}, {user['lon']})")
+
+    token = create_access_token(user)
+    return {"status": "registered", "token": token, "user": public_user(user)}
+
+
+@app.post("/auth/login")
+async def login_user(req: LoginRequest, request: Request):
+    """Authenticate an existing user and issue a JWT session token."""
+    client_ip = get_client_ip(request)
+    limit_reason = check_rate_limit("auth", client_ip, MAX_AUTH_ATTEMPTS_PER_IP_PER_HOUR)
+    if limit_reason:
+        raise HTTPException(status_code=429, detail=limit_reason)
+
+    user = find_user_by_email(req.email)
+    if not user or not verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    token = create_access_token(user)
+    print(f"[AUTH] Login: {user['email']}")
+    return {"status": "logged_in", "token": token, "user": public_user(user)}
+
+
+@app.get("/auth/me")
+async def get_me(current=Depends(get_current_user)):
+    """Return the profile for the currently authenticated user (validates the token)."""
+    user = find_user_by_email(current["email"])
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return {"user": public_user(user)}
+
+
+@app.put("/auth/location")
+async def update_location(
+    lat: float, lon: float, location_label: Optional[str] = None,
+    current=Depends(get_current_user)
+):
+    """Update the authenticated user's registered location (e.g. after allowing geolocation)."""
+    users = load_users()
+    user = next((u for u in users if u["email"] == current["email"]), None)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    user["lat"] = lat
+    user["lon"] = lon
+    if location_label is not None:
+        user["location_label"] = location_label
+    save_users(users)
+    print(f"[AUTH] Location updated for {user['email']}: ({lat}, {lon})")
+    return {"status": "updated", "user": public_user(user)}
+
 
 @app.post("/send-alert")
 async def send_alert(req: AlertRequest, request: Request):

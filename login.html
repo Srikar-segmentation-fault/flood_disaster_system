@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Login — FloodSense AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg-dark:#0a0e17;--bg-panel:#0f1520;--bg-card:#141c2e;
+  --border:rgba(99,179,237,0.15);--border-glow:rgba(99,179,237,0.35);
+  --text-primary:#e8f0fe;--text-secondary:#8ba3c7;--text-muted:#4a6080;
+  --accent-blue:#3b82f6;--accent-cyan:#06b6d4;
+  --font:'Inter',sans-serif;--mono:'JetBrains Mono',monospace;
+}
+body{
+  font-family:var(--font);background:var(--bg-dark);color:var(--text-primary);
+  min-height:100vh;display:flex;align-items:center;justify-content:center;
+  padding:20px;
+}
+.auth-card{
+  background:var(--bg-panel);border:1px solid var(--border);border-radius:16px;
+  padding:36px 34px;width:380px;max-width:100%;
+  box-shadow:0 8px 40px rgba(0,0,0,0.5);
+}
+.auth-logo{display:flex;align-items:center;gap:10px;margin-bottom:22px;}
+.auth-logo svg{width:30px;height:30px;flex-shrink:0;}
+.auth-logo span{font-size:16px;font-weight:700;color:#60a5fa;letter-spacing:-0.3px;}
+.auth-title{font-size:20px;font-weight:700;margin-bottom:6px;}
+.auth-sub{font-size:12px;color:var(--text-muted);margin-bottom:26px;}
+.field{margin-bottom:16px;}
+.field label{
+  display:block;font-size:10px;font-weight:600;text-transform:uppercase;
+  letter-spacing:0.8px;color:var(--text-muted);margin-bottom:6px;
+}
+.field input{
+  width:100%;background:var(--bg-card);border:1px solid var(--border);
+  border-radius:8px;padding:10px 12px;font-size:13px;color:var(--text-primary);
+  font-family:var(--font);outline:none;transition:border-color 0.2s;
+}
+.field input:focus{border-color:var(--border-glow);}
+.field input::placeholder{color:var(--text-muted);}
+.field-error{font-size:10px;color:#f87171;margin-top:5px;display:none;}
+.remember-row{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:20px;font-size:11px;color:var(--text-secondary);
+}
+.remember-row label{display:flex;align-items:center;gap:6px;cursor:pointer;}
+.remember-row a{color:#60a5fa;text-decoration:none;}
+.remember-row a:hover{text-decoration:underline;}
+.btn-submit{
+  width:100%;padding:11px;border-radius:8px;border:none;
+  background:#1d4ed8;color:#fff;font-size:13px;font-weight:700;
+  cursor:pointer;transition:background 0.2s;
+}
+.btn-submit:hover{background:#2563eb;}
+.form-msg{
+  font-size:11px;color:var(--accent-cyan);text-align:center;
+  margin-top:14px;display:none;
+}
+.auth-footer{
+  text-align:center;font-size:12px;color:var(--text-muted);margin-top:22px;
+}
+.auth-footer a{color:#60a5fa;text-decoration:none;font-weight:600;}
+.auth-footer a:hover{text-decoration:underline;}
+.disabled-note{
+  font-size:10px;color:var(--text-muted);text-align:center;margin-top:18px;
+  border-top:1px solid var(--border);padding-top:14px;line-height:1.5;
+}
+</style>
+</head>
+<body>
+
+<div class="auth-card">
+  <div class="auth-logo">
+    <svg viewBox="0 0 28 28" fill="none">
+      <circle cx="14" cy="14" r="13" stroke="#3b82f6" stroke-width="1.5"/>
+      <path d="M5 19 C7 15,9 21,11 17 C13 13,15 20,17 16 C19 12,21 18,23 18" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" fill="none"/>
+      <circle cx="14" cy="9" r="3" fill="#3b82f6" opacity="0.75"/>
+      <path d="M14 12 L14 17" stroke="#3b82f6" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+    <span>FloodSense AI</span>
+  </div>
+
+  <div class="auth-title">Welcome back</div>
+  <div class="auth-sub">Sign in to access your monitoring dashboard</div>
+
+  <form id="login-form" novalidate>
+    <div class="field">
+      <label for="login-email">Email</label>
+      <input type="email" id="login-email" name="email" placeholder="you@example.com" required/>
+      <div class="field-error" id="login-email-error">Please enter a valid email.</div>
+    </div>
+    <div class="field">
+      <label for="login-password">Password</label>
+      <input type="password" id="login-password" name="password" placeholder="••••••••" required minlength="6"/>
+      <div class="field-error" id="login-password-error">Password must be at least 6 characters.</div>
+    </div>
+    <div class="remember-row">
+      <label><input type="checkbox" id="login-remember"/> Remember me</label>
+      <a href="#" onclick="return false;">Forgot password?</a>
+    </div>
+    <button type="submit" class="btn-submit">Sign In</button>
+    <div class="form-msg" id="login-msg"></div>
+  </form>
+
+  <div class="auth-footer">
+    Don't have an account? <a href="register.html">Register</a>
+  </div>
+
+  <div class="disabled-note">
+    Sign in to see flood/storm risk specific to your registered location.
+  </div>
+</div>
+
+<script>
+const API_BASE_URL = 'http://localhost:8000'; // change to your deployed backend URL, e.g. https://flood-disaster-system.onrender.com
+
+document.getElementById('login-form').addEventListener('submit', async function(e){
+  e.preventDefault();
+
+  const email = document.getElementById('login-email');
+  const password = document.getElementById('login-password');
+  const msg = document.getElementById('login-msg');
+  let valid = true;
+
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim());
+  document.getElementById('login-email-error').style.display = emailValid ? 'none' : 'block';
+  if(!emailValid) valid = false;
+
+  const passValid = password.value.length >= 6;
+  document.getElementById('login-password-error').style.display = passValid ? 'none' : 'block';
+  if(!passValid) valid = false;
+
+  if(!valid){
+    msg.textContent = 'Please fix the errors above.';
+    msg.style.color = '#f87171';
+    msg.style.display = 'block';
+    return;
+  }
+
+  msg.textContent = 'Signing in…';
+  msg.style.color = '#8ba3c7';
+  msg.style.display = 'block';
+
+  try{
+    const resp = await fetch(`${API_BASE_URL}/auth/login`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ email: email.value.trim(), password: password.value })
+    });
+    const data = await resp.json();
+
+    if(resp.ok){
+      localStorage.setItem('floodsense_token', data.token);
+      localStorage.setItem('floodsense_user', JSON.stringify(data.user));
+      msg.textContent = 'Signed in! Redirecting…';
+      msg.style.color = '#4ade80';
+      setTimeout(()=>{ window.location.href = 'index.html'; }, 700);
+    } else {
+      msg.textContent = data.detail || 'Login failed.';
+      msg.style.color = '#f87171';
+    }
+  } catch(err){
+    msg.textContent = 'Could not reach the server. Is the backend running?';
+    msg.style.color = '#f87171';
+  }
+});
+</script>
+
+</body>
+</html>

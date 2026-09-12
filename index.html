@@ -334,6 +334,28 @@ body{font-family:var(--font);background:var(--bg-dark);color:var(--text-primary)
 @keyframes toastIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 @keyframes toastOut{from{opacity:1}to{opacity:0}}
 
+/* ── WELCOME OVERLAY (shown on first load while the globe idles) ── */
+#welcome-overlay{position:absolute;inset:0;background:rgba(5,8,14,0.55);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:2000;transition:opacity 0.5s;}
+#welcome-overlay.hidden{opacity:0;pointer-events:none;}
+.welcome-card{background:rgba(10,14,23,0.92);border:1px solid var(--border-glow);border-radius:18px;padding:34px 38px;width:420px;max-width:90vw;text-align:center;box-shadow:0 12px 60px rgba(0,0,0,0.6);}
+.welcome-card .wc-icon{font-size:34px;margin-bottom:10px;}
+.welcome-card h2{font-size:19px;font-weight:700;margin-bottom:6px;}
+.welcome-card p{font-size:12px;color:var(--text-secondary);line-height:1.6;margin-bottom:22px;}
+.welcome-actions{display:flex;gap:8px;margin-bottom:14px;}
+.welcome-btn{flex:1;padding:10px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:var(--text-primary);transition:all 0.2s;text-decoration:none;display:flex;align-items:center;justify-content:center;}
+.welcome-btn:hover{border-color:var(--border-glow);background:rgba(99,179,237,0.1);}
+.welcome-btn.primary{background:#1d4ed8;border-color:#1d4ed8;color:#fff;}
+.welcome-btn.primary:hover{background:#2563eb;}
+.welcome-guest{font-size:11px;color:var(--text-muted);cursor:pointer;text-decoration:underline;}
+.welcome-guest:hover{color:var(--text-secondary);}
+
+/* ── Topbar auth pill ── */
+.auth-pill{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:20px;padding:4px 6px 4px 12px;font-size:11px;font-weight:600;color:var(--text-secondary);cursor:pointer;transition:all 0.2s;white-space:nowrap;user-select:none;}
+.auth-pill:hover{border-color:var(--border-glow);color:var(--text-primary);}
+.auth-pill .ap-avatar{width:20px;height:20px;border-radius:50%;background:#1d4ed8;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.auth-pill .ap-logout{font-size:10px;color:var(--text-muted);padding:3px 8px;border-radius:12px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);}
+.auth-pill .ap-logout:hover{color:#f87171;border-color:rgba(239,68,68,0.4);}
+
 /* LOADING */
 #ls{position:absolute;inset:0;background:var(--bg-dark);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;gap:14px;}
 .spin{width:44px;height:44px;border-radius:50%;border:3px solid rgba(99,179,237,0.12);border-top-color:var(--accent-blue);animation:spin 0.8s linear infinite;}
@@ -488,6 +510,7 @@ body.dash-mode .globe-only{opacity:0;pointer-events:none;max-width:0;padding-lef
   <div class="topbar-btn globe-only" id="btn-replay" onclick="openEventsModal()">&#128260; Replay</div>
   <div class="topbar-btn globe-only" id="btn-farm" onclick="toggleFarmMode()">&#127806; Farm Mode</div>
   <div class="status-pill"><div class="sdot"></div>Prediction Engine Online</div>
+  <div id="auth-pill-slot"></div>
   <div id="clock">--:--:--</div>
 </div>
 
@@ -633,6 +656,21 @@ body.dash-mode .globe-only{opacity:0;pointer-events:none;max-width:0;padding-lef
   <!-- GLOBE -->
   <div id="gw">
     <div id="cesiumContainer"></div>
+
+    <!-- WELCOME OVERLAY: shown while the globe idles on first visit -->
+    <div id="welcome-overlay">
+      <div class="welcome-card">
+        <div class="wc-icon">🌍</div>
+        <h2>Welcome to FloodSense AI</h2>
+        <p>Register your location to see flood &amp; storm risk specific to you, and receive alerts for your area — or continue as a guest to explore the global view.</p>
+        <div class="welcome-actions">
+          <a class="welcome-btn primary" href="register.html">Register</a>
+          <a class="welcome-btn" href="login.html">Sign In</a>
+        </div>
+        <div class="welcome-guest" onclick="dismissWelcomeOverlay()">Continue as guest →</div>
+      </div>
+    </div>
+
     <div id="gov">
       <div class="gbadge"><span id="ec" class="cnt">0</span>&nbsp;risk zones active</div>
       <div class="gbadge" id="eq-badge" style="display:none"><span class="cnt" id="eq-cnt">0</span>&nbsp;earthquakes</div>
@@ -1044,6 +1082,8 @@ const CYCLONE_TRACKS = [
 // STATE
 // ═══════════════════════════════════════════════════════════════════
 let viewer, updateMs=CONFIG.UPDATE_INTERVAL_MS;
+let idleSpinEnabled=true;
+let currentAuthUser=null;
 let itvHandle, cdHandle, cdRem=0, lastUpdate=null;
 let layers={risk:true,rain:true,spread:true,rivers:true,gauges:true,earthquakes:true,wildfires:true,cyclones:true,terrain:false};
 let allEntities=[], spreadEntities=[], eqEntities=[], fireEntities=[], cycloneEntities=[], gaugeEntities=[], farmEntities=[];
@@ -1339,6 +1379,11 @@ async function initCesium(){
   viewer.scene.globe.preloadSiblings=true;
 
   viewer.camera.flyTo({destination:Cesium.Cartesian3.fromDegrees(88,18,18000000),duration:0});
+
+  // Slow idle rotation shown to first-time/guest visitors behind the welcome overlay.
+  viewer.scene.preRender.addEventListener(()=>{
+    if(idleSpinEnabled) viewer.camera.rotate(Cesium.Cartesian3.UNIT_Z, -0.0006);
+  });
 
   const evtH=new Cesium.ScreenSpaceEventHandler(viewer.canvas);
   evtH.setInputAction(mv=>{
@@ -2178,6 +2223,53 @@ function switchTab(tabId,btn){
 setInterval(()=>document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-US',{hour12:false}),1000);
 
 // ═══════════════════════════════════════════════════════════════════
+// AUTH — welcome overlay + topbar pill
+// ═══════════════════════════════════════════════════════════════════
+function getStoredAuth(){
+  const token=localStorage.getItem('floodsense_token');
+  const userRaw=localStorage.getItem('floodsense_user');
+  if(!token||!userRaw) return null;
+  try{ return{token,user:JSON.parse(userRaw)}; }catch(e){ return null; }
+}
+
+function logoutUser(){
+  localStorage.removeItem('floodsense_token');
+  localStorage.removeItem('floodsense_user');
+  currentAuthUser=null;
+  renderAuthPill();
+}
+
+function renderAuthPill(){
+  const slot=document.getElementById('auth-pill-slot');
+  const auth=getStoredAuth();
+  if(auth){
+    currentAuthUser=auth.user;
+    const initial=(auth.user.name||'?').trim().charAt(0).toUpperCase();
+    slot.innerHTML=`
+      <div class="auth-pill" title="${auth.user.email}">
+        <div class="ap-avatar">${initial}</div>
+        <span>${auth.user.name}</span>
+        <span class="ap-logout" onclick="event.stopPropagation();logoutUser();">Logout</span>
+      </div>`;
+  } else {
+    slot.innerHTML=`
+      <div class="auth-pill" onclick="window.location.href='login.html'">
+        &#128100; Sign In / Register
+      </div>`;
+  }
+}
+
+function dismissWelcomeOverlay(rememberChoice=true){
+  const overlay=document.getElementById('welcome-overlay');
+  if(overlay){
+    overlay.classList.add('hidden');
+    setTimeout(()=>{overlay.style.display='none';},500);
+  }
+  idleSpinEnabled=false;
+  if(rememberChoice) sessionStorage.setItem('floodsense_welcome_dismissed','1');
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // BOOT SEQUENCE
 // ═══════════════════════════════════════════════════════════════════
 window.addEventListener('load',async()=>{
@@ -2198,6 +2290,25 @@ window.addEventListener('load',async()=>{
     const ls=document.getElementById('ls');
     ls.style.transition='opacity 0.6s';ls.style.opacity='0';
     setTimeout(()=>ls.style.display='none',700);
+
+    // ── Auth state: show topbar pill, and either skip or show the welcome overlay ──
+    renderAuthPill();
+    const auth=getStoredAuth();
+    const alreadyDismissed=sessionStorage.getItem('floodsense_welcome_dismissed')==='1';
+    if(auth || alreadyDismissed){
+      dismissWelcomeOverlay(false);
+      // If a logged-in user has a registered location, fly there so they see local risk first.
+      if(auth && auth.user.lat!=null && auth.user.lon!=null){
+        viewer.camera.flyTo({
+          destination:Cesium.Cartesian3.fromDegrees(auth.user.lon,auth.user.lat,900000),
+          duration:2.5,
+          orientation:{heading:0,pitch:Cesium.Math.toRadians(-75),roll:0},
+          easingFunction:Cesium.EasingFunction.CUBIC_IN_OUT
+        });
+      }
+    }
+    // Otherwise the globe keeps idly spinning behind the welcome overlay until the
+    // user registers/signs in or clicks "Continue as guest".
 
     await runPrediction();
     itvHandle=setInterval(runPrediction,updateMs);

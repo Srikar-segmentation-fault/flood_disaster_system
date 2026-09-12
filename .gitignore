@@ -18,3 +18,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Runtime data files (local dev only — production data lives on the server/disk)
+users.json
+farmers.json
